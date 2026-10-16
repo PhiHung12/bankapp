@@ -466,7 +466,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ==========================================
-// MÀN HÌNH CHI TIẾT TÀI KHOẢN (Modern)
+// MÀN HÌNH CHI TIẾT TÀI KHOẢN (Đã thêm chức năng Xóa)
 // ==========================================
 class AccountDetailsScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -485,15 +485,94 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
     _fetchBankAccounts();
   }
 
-  // GIỮ NGUYÊN LOGIC FETCH DATA
   Future<void> _fetchBankAccounts() async {
     try {
-      final response = await Supabase.instance.client.from('bank_accounts').select().eq('user_id', widget.userData['id']);
+      final response = await Supabase.instance.client
+          .from('bank_accounts')
+          .select()
+          .eq('user_id', widget.userData['id'])
+          .order('id', ascending: true);
+          
       if(mounted){
-        setState(() { _bankAccounts = response; _isLoading = false; });
+        setState(() { 
+          _bankAccounts = response; 
+          _isLoading = false; 
+        });
       }
     } catch (e) {
       if(mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ==========================================
+  // HÀM XỬ LÝ XÓA TÀI KHOẢN
+  // ==========================================
+  Future<void> _deleteAccount(Map<String, dynamic> account) async {
+    // 1. Kiểm tra số lượng tài khoản (Không được xóa nếu chỉ có 1)
+    if (_bankAccounts.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Không thể xóa! Bạn phải giữ lại ít nhất 1 tài khoản để giao dịch.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    // 2. Kiểm tra số dư (Bắt buộc phải = 0 VND mới được xóa)
+    final int balance = account['balance'] as int? ?? 0;
+    if (balance > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tài khoản vẫn còn số dư! Vui lòng chuyển hết tiền trước khi xóa.'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
+    // 3. Hiển thị Popup xác nhận
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Xác nhận hủy tài khoản', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+        content: Text(
+          'Bạn có chắc chắn muốn hủy tài khoản ${account['account_number']} không?\n\nNếu đây là tài khoản số đẹp, số này sẽ được trả về Cửa Hàng để người khác có thể mua lại.',
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false), 
+            child: const Text('Quay lại', style: TextStyle(color: Colors.grey))
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Hủy tài khoản'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      // 4. Thực hiện xóa khỏi Database
+      await Supabase.instance.client
+          .from('bank_accounts')
+          .delete()
+          .eq('id', account['id']);
+          
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Hủy tài khoản thành công!'), backgroundColor: Colors.green),
+        );
+      }
+      
+      // Load lại danh sách thẻ mới
+      _fetchBankAccounts();
+    } catch (e) {
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -503,6 +582,7 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
     for (var acc in _bankAccounts) totalBalance += (acc['balance'] as int? ?? 0);
 
     return Scaffold(
+      backgroundColor: AppColors.background, // Kế thừa từ main.dart
       appBar: AppBar(
         title: const Text('Tài khoản của tôi'),
       ),
@@ -542,6 +622,7 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
                     itemBuilder: (context, index) {
                       final account = _bankAccounts[index];
                       final accountBalance = account['balance'] as int? ?? 0;
+                      
                       return Container(
                         margin: const EdgeInsets.only(bottom: 16),
                         decoration: BoxDecoration(
@@ -554,7 +635,6 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
                           borderRadius: BorderRadius.circular(16),
                           child: InkWell(
                             borderRadius: BorderRadius.circular(16),
-                            // GIỮ NGUYÊN LOGIC CHUYỂN TRANG
                             onTap: () {
                               Navigator.push(
                                 context,
@@ -567,7 +647,7 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
                               );
                             },
                             child: Padding(
-                              padding: const EdgeInsets.all(16.0),
+                              padding: const EdgeInsets.all(12.0),
                               child: Row(
                                 children: [
                                   Container(
@@ -586,7 +666,12 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
                                       ],
                                     ),
                                   ),
-                                  const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                                  // NÚT XÓA TÀI KHOẢN (Chỉ hiển thị thùng rác)
+                                  IconButton(
+                                    onPressed: () => _deleteAccount(account),
+                                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                    tooltip: 'Hủy tài khoản này',
+                                  ),
                                 ],
                               ),
                             ),
